@@ -1,22 +1,47 @@
 import { existsSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { ConfigurationError } from '../errors/app-errors.js';
-import { QUERY_LIMITS, SQL_QUERY_LIMITS } from '../security/query-limits.js';
+import { ConfigurationError } from '../domain/errors.js';
+import { QUERY_LIMITS, SQL_QUERY_LIMITS } from '../domain/security/query-limits.js';
 
-/** Loads `.env` from the working directory if present (real env vars win). */
-export function loadDotEnv(path = '.env'): void {
+/**
+ * Project root (the folder holding package.json, config/ and data/), from this
+ * file's location: src/config or dist/config → ../.. . Relative paths are
+ * resolved against it, never against the current directory, so the server and
+ * the CLI find the same .env and users.yaml wherever they are launched from.
+ */
+export const APP_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+
+export function resolveFromRoot(path: string): string {
+  return isAbsolute(path) ? path : resolve(APP_ROOT, path);
+}
+
+/** Loads `<APP_ROOT>/.env` if present (real env vars, e.g. from pm2, win). */
+export function loadDotEnv(path = resolveFromRoot('.env')): void {
   if (existsSync(path)) process.loadEnvFile(path);
 }
+
+/**
+ * `VAR=` in .env means "not set": use the default. Without this, MCP_PORT=
+ * would coerce to port 0 (a random port) and DB_X_SSL= would fail validation.
+ */
+export function withoutEmptyValues(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(source).filter(([, value]) => value !== undefined && value.trim() !== ''));
+}
+
+/** A file path; relative values are taken from APP_ROOT. */
+const rootPath = (fallback: string) => z.string().default(fallback).transform(resolveFromRoot);
 
 const positiveInt = (fallback: number) => z.coerce.number().int().positive().default(fallback);
 
 const EnvSchema = z.object({
   MCP_HOST: z.string().default('127.0.0.1'),
-  MCP_PORT: z.coerce.number().int().min(0).max(65535).default(3030),
-  CIRCUITS_FILE: z.string().default('config/circuits.yaml'),
-  CIRCUIT_ACCESS_FILE: z.string().default('config/circuit-access.yaml'),
-  USERS_FILE: z.string().default('data/users.yaml'),
-  AUDIT_LOG_FILE: z.string().optional(),
+  MCP_PORT: z.coerce.number().int().min(1).max(65535).default(3030),
+  CIRCUITS_FILE: rootPath('config/circuits.yaml'),
+  CIRCUIT_ACCESS_FILE: rootPath('config/circuit-access.yaml'),
+  USERS_FILE: rootPath('data/users.yaml'),
+  AUDIT_LOG_FILE: z.string().transform(resolveFromRoot).optional(),
 
   QUERY_DEFAULT_ROWS: positiveInt(QUERY_LIMITS.defaultRows),
   QUERY_MAX_ROWS: positiveInt(QUERY_LIMITS.maxRows),
@@ -39,7 +64,7 @@ const EnvSchema = z.object({
 export type Env = z.infer<typeof EnvSchema>;
 
 export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  const result = EnvSchema.safeParse(source);
+  const result = EnvSchema.safeParse(withoutEmptyValues(source));
   if (!result.success) {
     throw new ConfigurationError(`Invalid environment:\n${z.prettifyError(result.error)}`);
   }

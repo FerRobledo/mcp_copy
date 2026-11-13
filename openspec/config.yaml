@@ -53,9 +53,13 @@ context: |
   Stack y convenciones técnicas:
   - Node >= 22, TypeScript 7 (ESM, imports con extensión .js), MCP SDK v2 en
     paquetes separados (@modelcontextprotocol/server y /node), zod 4, pg, yaml.
-  - Arquitectura por capas con un composition root (src/app.ts); las carpetas de
-    src/ gritan el dominio (auth, circuits, permissions, query, database, security,
-    audit, users, mcp). Sin dependencias nuevas sin justificación en design.md.
+  - Arquitectura hexagonal (puertos y adaptadores): src/domain (reglas puras),
+    src/application (ports/outbound, services, use-cases), src/adapters (inbound:
+    http, mcp, cli; outbound: postgres, yaml, audit, memory, logging) y un composition
+    root en src/composition (container.ts + bootstrap.ts). Las dependencias apuntan
+    hacia adentro; test/unit/architecture.test.ts lo verifica. dist/index.js y
+    dist/cli/create-user.js son rutas estables (pm2 y docs de la VPS).
+    Sin dependencias nuevas sin justificación en design.md.
   - Tests con vitest: unitarios + e2e MCP por HTTP sin base (npm test) e
     integración con PostgreSQL efímero vía testcontainers (npm run test:integration).
     Toda regla de seguridad nueva o modificada lleva test unitario y e2e.

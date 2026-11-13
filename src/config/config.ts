@@ -1,4 +1,4 @@
-import type { QueryLimits, SqlQueryLimits } from '../security/query-limits.js';
+import type { QueryLimits, SqlQueryLimits } from '../domain/security/query-limits.js';
 import type { Env } from './env.js';
 
 export interface AppConfig {

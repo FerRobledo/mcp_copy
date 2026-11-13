@@ -1,15 +1,20 @@
 import type { AddressInfo } from 'node:net';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { createApplication, type Application, type ApplicationOptions } from '../src/app.js';
-import { InMemoryAuditLogger } from '../src/audit/audit.logger.js';
-import { generateToken, hashToken } from '../src/auth/token-verifier.js';
-import type { DatabaseAdapter } from '../src/database/database.adapter.js';
-import { DatabaseRegistry } from '../src/database/database.registry.js';
-import type { SelectOptions, SelectResult, SqlOptions, SqlResult } from '../src/database/database.types.js';
-import { RolePolicyLoader } from '../src/permissions/role-policy.loader.js';
-import { QUERY_LIMITS } from '../src/security/query-limits.js';
-import type { UserRecord } from '../src/users/user.model.js';
-import { InMemoryUserRepository } from '../src/users/user.repository.js';
+import { createApplication, type Application, type ApplicationOptions } from '../src/composition/container.js';
+import { InMemoryAuditLogger } from '../src/adapters/outbound/memory/in-memory-audit.logger.js';
+import { generateToken, hashToken } from '../src/domain/auth-token.js';
+import { DatabaseRegistry } from '../src/adapters/outbound/postgres/database.registry.js';
+import type {
+  ReadOnlyDatabasePort,
+  SelectOptions,
+  SelectResult,
+  SqlOptions,
+  SqlResult,
+} from '../src/application/ports/outbound/database.port.js';
+import { RolePolicyLoader } from '../src/adapters/outbound/yaml/role-policy.loader.js';
+import { QUERY_LIMITS } from '../src/domain/security/query-limits.js';
+import type { UserRecord } from '../src/domain/user.js';
+import { InMemoryUserRepository } from '../src/adapters/outbound/memory/in-memory-user.repository.js';
 import { loadRealRegistry } from './helpers.js';
 
 export const TEST_ROLE_POLICY = `
@@ -37,7 +42,7 @@ export function makeUser(id: string, role: string, databaseKey: string, enabled 
 }
 
 /** Records every call; returns canned rows. Proves what reaches (or not) the database. */
-export class SpyDatabaseAdapter implements DatabaseAdapter {
+export class SpyDatabaseAdapter implements ReadOnlyDatabasePort {
   readonly calls: Array<{ databaseKey: string; sql: string; params: unknown[] }> = [];
   constructor(private readonly respond: (databaseKey: string) => SelectResult | Error = () => ({ rows: [], rowCount: 0 })) {}
 

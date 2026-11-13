@@ -41,16 +41,45 @@ error de validación. Ninguna tool escribe datos.
 
 Operadores de filtro: `eq neq gt gte lt lte in contains startsWith isNull isNotNull`.
 
+## Arquitectura (puertos y adaptadores)
+
+```
+src/
+  domain/          reglas puras: errores, UserContext, catálogo de circuitos,
+                   QueryCompiler, límites. Sin dependencias externas.
+  application/
+    ports/outbound puertos: ReadOnlyDatabasePort, UserRepository, AuditLogger,
+                   RateLimiterPort, InternalErrorLogger
+    services/      AuthorizationService, CircuitPolicyService, QueryValidator
+    use-cases/     AuthenticateUser, ListCircuits, DescribeCircuit,
+                   QueryCircuit, QuerySql, ManageUsers
+  adapters/
+    inbound/       http (bearer + Streamable HTTP), mcp (tools), cli (usuarios)
+    outbound/      postgres, yaml (circuits, roles, users), audit, memory, logging
+  composition/     container.ts (cablea puertos ↔ adaptadores), bootstrap.ts (archivos + env)
+  config/          lectura y validación del entorno
+  index.ts         proceso del servidor (dist/index.js, lo corre pm2)
+  cli/create-user.ts  CLI de usuarios (dist/cli/create-user.js)
+```
+
+Las dependencias apuntan hacia adentro: `domain` no importa nada externo y
+`application` solo `domain` y sus puertos. `test/unit/architecture.test.ts` lo verifica.
+
 ## Flujo
 
 ```
-Bearer token → TokenVerifier → UserRepository → UserContext (server-side)
-query_circuit → Zod (estructura) → RateLimiter → QueryValidator (autorización)
-  → QueryCompiler (SQL parametrizado) → QueryExecutor(UserContext.databaseKey)
-  → DatabaseAdapter → Pool → PostgreSQL (BEGIN READ ONLY … ROLLBACK, rol mcp_popey_ro)
-query_sql → Zod ({ sql }) → RateLimiter → SqlExecutor(UserContext.databaseKey)
-  → DatabaseAdapter (cursor: una sentencia, maxRows + 1) → PostgreSQL (mismas barreras)
+Bearer token → BearerAuth → AuthenticateUserUseCase → UserRepository → UserContext (server-side)
+query_circuit → Zod (estructura) → QueryCircuitUseCase: RateLimiter → QueryValidator (autorización)
+  → QueryCompiler (SQL parametrizado) → ReadOnlyDatabasePort(UserContext.databaseKey)
+  → PostgresDatabaseAdapter → Pool → PostgreSQL (BEGIN READ ONLY … ROLLBACK, rol mcp_popey_ro)
+query_sql → Zod ({ sql }) → QuerySqlUseCase: rol con sql → RateLimiter
+  → ReadOnlyDatabasePort(UserContext.databaseKey) (cursor: una sentencia, maxRows + 1) → PostgreSQL
 ```
+
+## Deploy (VPS con nginx + pm2)
+
+Guía completa en `docs/INSTALACION-VPS.txt`. Archivos versionados:
+`deploy/pm2/ecosystem.config.cjs` y `deploy/nginx/mcp-popey.conf`.
 
 ## Reglas de `circuits.yaml`
 

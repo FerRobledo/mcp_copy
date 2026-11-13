@@ -1,19 +1,20 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { AuthMiddleware } from '../../src/auth/auth.middleware.js';
-import { generateToken, hashToken, TokenVerifier } from '../../src/auth/token-verifier.js';
-import type { UserContext } from '../../src/auth/user-context.js';
-import { CircuitPolicyService } from '../../src/circuits/circuit-policy.service.js';
+import { BearerAuth } from '../../src/adapters/inbound/http/bearer-auth.js';
+import { AuthenticateUserUseCase } from '../../src/application/use-cases/authenticate-user.use-case.js';
+import { generateToken, hashToken } from '../../src/domain/auth-token.js';
+import type { UserContext } from '../../src/domain/user-context.js';
+import { CircuitPolicyService } from '../../src/application/services/circuit-policy.service.js';
 import {
   AuthenticationError,
   AuthorizationError,
   CircuitNotFoundError,
   ConfigurationError,
   TableNotAllowedError,
-} from '../../src/errors/app-errors.js';
-import { AuthorizationService } from '../../src/permissions/authorization.service.js';
-import { RolePolicyLoader } from '../../src/permissions/role-policy.loader.js';
-import { InMemoryUserRepository } from '../../src/users/user.repository.js';
+} from '../../src/domain/errors.js';
+import { AuthorizationService } from '../../src/application/services/authorization.service.js';
+import { RolePolicyLoader } from '../../src/adapters/outbound/yaml/role-policy.loader.js';
+import { InMemoryUserRepository } from '../../src/adapters/outbound/memory/in-memory-user.repository.js';
 import { loadTestRegistry } from '../helpers.js';
 
 const registry = loadTestRegistry();
@@ -170,7 +171,7 @@ describe('Authentication', () => {
     { id: 'u1', username: 'ana', role: 'ventas', databaseKey: 'lang', enabled: true, tokenSha256: hashToken(tokenA), createdAt: '' },
     { id: 'u2', username: 'beto', role: 'ventas', databaseKey: 'lang', enabled: false, tokenSha256: hashToken(tokenDisabled), createdAt: '' },
   ]);
-  const middleware = new AuthMiddleware(new TokenVerifier(users), users);
+  const middleware = new BearerAuth(new AuthenticateUserUseCase(users));
 
   it('valid token → UserContext built server-side', async () => {
     const context = await middleware.authenticate({ headers: { authorization: `Bearer ${tokenA}` } });

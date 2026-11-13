@@ -173,7 +173,7 @@ B.1 Compilar y empaquetar:
   cd mcp-popey
   npm ci
   npm run build
-  tar -czf mcp-popey.tar.gz dist config scripts package.json package-lock.json .env.example
+  tar -czf mcp-popey.tar.gz dist config scripts deploy package.json package-lock.json .env.example
   scp mcp-popey.tar.gz root@<VPS_IP>:/tmp/
 
   Si SSH usa un puerto distinto de 22:  scp -P <PUERTO> mcp-popey.tar.gz ...
@@ -249,10 +249,14 @@ Valores obligatorios:
   CIRCUIT_ACCESS_FILE=config/circuit-access.yaml
   USERS_FILE=data/users.yaml
 
-IMPORTANTE: ninguna variable puede quedar vacia (VAR=). Una variable
-vacia NO toma el valor por defecto: el MCP no arranca o usa un valor
-invalido (ej: MCP_PORT= se interpreta como puerto 0). Completarla con
-su valor o borrar la linea entera para que use el default.
+Una variable vacia (VAR=) toma el valor por defecto. Las rutas
+relativas se resuelven desde /opt/mcp-popey/app (no desde la carpeta
+donde se ejecuta el comando), asi el servidor y la CLI usan siempre
+el mismo .env y el mismo data/users.yaml.
+
+Lo unico que si debe completarse es DB_<KEY>_HOST / _NAME / _USER /
+_PASSWORD de cada base listada en DATABASE_KEYS: si falta alguno, el
+MCP no arranca y pm2 logs dice cual.
 
 Revisar tambien config/circuit-access.yaml: define que circuitos ve
 cada rol y si tiene query_sql habilitado.
@@ -282,29 +286,17 @@ Otras operaciones:
  7. LEVANTAR CON PM2
 ---------------------------------------------------------------------
 
-7.1 Crear el archivo de proceso:
+7.1 Copiar el archivo de proceso (esta versionado en el repo):
 
 [VPS]
-cat > /opt/mcp-popey/ecosystem.config.cjs <<'EOF'
-module.exports = {
-  apps: [{
-    name: 'mcp-popey',
-    cwd: '/opt/mcp-popey/app',
-    script: 'dist/index.js',
-    interpreter: '/opt/mcp-popey/runtime/bin/node',
-    exec_mode: 'fork',
-    instances: 1,
-    max_memory_restart: '250M',
-    out_file: '/opt/mcp-popey/logs/out.log',
-    error_file: '/opt/mcp-popey/logs/error.log',
-    env: {
-      NODE_ENV: 'production',
-      MCP_HOST: '127.0.0.1',
-      MCP_PORT: '3030'
-    }
-  }]
-};
-EOF
+  cp /opt/mcp-popey/app/deploy/pm2/ecosystem.config.cjs /opt/mcp-popey/ecosystem.config.cjs
+
+  Se copia FUERA de app/ para que un git pull o el tar no lo pisen.
+  Incluye kill_timeout 6000 (el MCP espera hasta 5 s a que terminen las
+  consultas en curso al reiniciar) y corta los reintentos si el proceso
+  muere apenas arranca (.env o YAML invalido): mirar pm2 logs.
+
+  MCP_HOST y MCP_PORT del bloque env de pm2 GANAN sobre el .env.
 
 7.2 Arrancar y guardar:
 
@@ -344,34 +336,14 @@ EOF
   getent hosts <DOMINIO>
       -> debe devolver <VPS_IP>
 
-8.2 Crear el sitio (reemplazar <DOMINIO> dentro del archivo):
+8.2 Crear el sitio desde la plantilla del repo, reemplazando <DOMINIO>
+    (ej: mcp.midominio.com):
 
 [VPS]
-cat > /etc/nginx/sites-available/mcp-popey <<'EOF'
-server {
-    listen 80;
-    server_name <DOMINIO>;
-
-    location = /mcp {
-        proxy_pass http://127.0.0.1:3030;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Connection "";
-
-        # Streamable HTTP puede responder por SSE: no bufferear
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 300s;
-        client_max_body_size 1m;
-    }
-
-    location / {
-        return 404;
-    }
-}
-EOF
+  sed 's/<DOMINIO>/mcp.midominio.com/' /opt/mcp-popey/app/deploy/nginx/mcp-popey.conf \
+    > /etc/nginx/sites-available/mcp-popey
+  grep server_name /etc/nginx/sites-available/mcp-popey
+      -> debe mostrar el dominio real, sin < >
 
   ln -s /etc/nginx/sites-available/mcp-popey /etc/nginx/sites-enabled/mcp-popey
   nginx -t && systemctl reload nginx
@@ -458,7 +430,7 @@ Opcion B:
 
 [PC]
   git pull && npm ci && npm run build
-  tar -czf mcp-popey.tar.gz dist config scripts package.json package-lock.json .env.example
+  tar -czf mcp-popey.tar.gz dist config scripts deploy package.json package-lock.json .env.example
   scp mcp-popey.tar.gz root@<VPS_IP>:/tmp/
 
 [VPS]

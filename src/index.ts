@@ -1,44 +1,35 @@
-import { createApplication } from './app.js';
-import { JsonLinesAuditLogger } from './audit/audit.logger.js';
-import { CircuitLoader } from './circuits/circuit.loader.js';
-import { CircuitRegistry } from './circuits/circuit.registry.js';
-import { buildConfig } from './config/config.js';
-import { loadDotEnv, readEnv } from './config/env.js';
-import { DatabaseRegistry } from './database/database.registry.js';
-import { RolePolicyLoader } from './permissions/role-policy.loader.js';
-import { YamlUserRepository } from './users/user.repository.js';
+/**
+ * Server entrypoint (dist/index.js, the script pm2 runs). Wiring lives in
+ * composition/; this file only handles process lifecycle.
+ */
+import { buildServer, loadRuntimeConfig } from './composition/bootstrap.js';
+
+/** Upper bound for a graceful stop; open SSE streams must not block a pm2 restart. */
+const SHUTDOWN_TIMEOUT_MS = 5_000;
 
 function main(): void {
-  loadDotEnv();
-  const config = buildConfig(readEnv());
+  const config = loadRuntimeConfig();
+  const { app, summary } = buildServer(config);
 
-  // Any structural problem in these files aborts startup.
-  const circuitRegistry = CircuitRegistry.fromDefinitions(CircuitLoader.loadFile(config.circuitsFile));
-  const rolePolicy = RolePolicyLoader.loadFile(config.circuitAccessFile, circuitRegistry);
-  const databases = DatabaseRegistry.fromEnv();
-
-  const app = createApplication({
-    circuitRegistry,
-    rolePolicy,
-    users: new YamlUserRepository(config.usersFile),
-    databases,
-    queryLimits: config.queryLimits,
-    sqlQueryLimits: config.sqlQueryLimits,
-    rateLimit: config.rateLimit,
-    dbPoolMax: config.dbPoolMax,
-    audit: new JsonLinesAuditLogger(config.auditLogFile),
+  app.httpServer.on('error', (error: NodeJS.ErrnoException) => {
+    const reason =
+      error.code === 'EADDRINUSE'
+        ? `port ${config.port} on ${config.host} is already in use (check MCP_PORT and \`ss -ltnp | grep -w ${config.port}\`)`
+        : error.message;
+    console.error(`mcp-popey cannot listen: ${reason}`);
+    process.exit(1);
   });
 
   app.httpServer.listen(config.port, config.host, () => {
-    console.error(
-      `mcp-popey listening on http://${config.host}:${config.port}/mcp ` +
-        `(${circuitRegistry.ids().length} circuits, ${rolePolicy.roles.size} roles, ` +
-        `query_sql roles: ${[...rolePolicy.sqlRoles].join(', ') || 'none'}, ` +
-        `databases: ${databases.keys().join(', ') || 'none'})`,
-    );
+    console.error(`mcp-popey listening on http://${config.host}:${config.port}/mcp (${summary})`);
   });
 
-  const shutdown = () => {
+  let stopping = false;
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (stopping) return;
+    stopping = true;
+    console.error(`mcp-popey received ${signal}, shutting down`);
+    setTimeout(() => process.exit(0), SHUTDOWN_TIMEOUT_MS).unref();
     app.close().finally(() => process.exit(0));
   };
   process.once('SIGINT', shutdown);

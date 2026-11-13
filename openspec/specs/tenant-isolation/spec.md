@@ -6,7 +6,7 @@ Garantiza que cada usuario consulte solo la base de su tenant: el `databaseKey` 
 ## Requirements
 
 ### Requirement: databaseKey solo server-side
-La base de cada consulta SHALL ser siempre `UserContext.databaseKey`. `QueryExecutor` MUST NOT tener otra forma de elegir base, y ningún input de tool puede aportar ni influir en ella.
+La base de cada consulta SHALL ser siempre `UserContext.databaseKey`. `QueryCircuitUseCase` y `QuerySqlUseCase` MUST NOT tener otra forma de elegir base, y ningún input de tool puede aportar ni influir en ella.
 
 #### Scenario: Dos tenants
 - **WHEN** usuarios de los tenants `lang` y `cliente_b` hacen la misma consulta

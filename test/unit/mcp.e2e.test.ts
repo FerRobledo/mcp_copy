@@ -1,6 +1,6 @@
 import type { Client } from '@modelcontextprotocol/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DatabaseQueryError } from '../../src/errors/app-errors.js';
+import { DatabaseQueryError } from '../../src/domain/errors.js';
 import {
   callTool,
   connectClient,
@@ -28,7 +28,7 @@ let clientC: Client;
 const facturas = { circuit: 'venta', table: 'stock.factura_venta', select: ['nfacturaventa', 'ftotal'] };
 
 beforeAll(async () => {
-  testApp = await startTestApp([userA, userB, comprador, disabled], { databaseAdapter: spy });
+  testApp = await startTestApp([userA, userB, comprador, disabled], { database: spy });
   clientA = await connectClient(testApp.url, userA.token);
   clientB = await connectClient(testApp.url, userB.token);
   clientC = await connectClient(testApp.url, comprador.token);
@@ -181,7 +181,7 @@ describe('controlled errors and audit', () => {
     const leaky = new SpyDatabaseAdapter(
       () => new Error('connect ECONNREFUSED postgres://mcp_popey_ro:s3cret@10.0.0.5:5432/lang SELECT "x" FROM y'),
     );
-    const isolated = await startTestApp([userA], { databaseAdapter: leaky });
+    const isolated = await startTestApp([userA], { database: leaky });
     const client = await connectClient(isolated.url, userA.token);
     try {
       const outcome = await callTool(client, 'query_circuit', facturas);
@@ -226,7 +226,7 @@ describe('controlled errors and audit', () => {
 
   it('rate limit is per user', async () => {
     const limited = await startTestApp([userA, userB], {
-      databaseAdapter: new SpyDatabaseAdapter(),
+      database: new SpyDatabaseAdapter(),
       rateLimit: { maxRequests: 2, windowMs: 60_000 },
     });
     const a = await connectClient(limited.url, userA.token);
@@ -253,7 +253,7 @@ describe('query_sql (free read-only SQL, opt-in per role)', () => {
   let clientV: Client;
 
   beforeAll(async () => {
-    sqlApp = await startTestApp([analista, userA], { databaseAdapter: sqlSpy });
+    sqlApp = await startTestApp([analista, userA], { database: sqlSpy });
     clientS = await connectClient(sqlApp.url, analista.token);
     clientV = await connectClient(sqlApp.url, userA.token);
   });
@@ -311,7 +311,7 @@ describe('query_sql (free read-only SQL, opt-in per role)', () => {
           diagnostics: { sqlState: '42601', message: 'syntax error at or near "SELEC"', position: 1 },
         }),
     );
-    const isolated = await startTestApp([analista], { databaseAdapter: failing });
+    const isolated = await startTestApp([analista], { database: failing });
     const client = await connectClient(isolated.url, analista.token);
     try {
       const outcome = await callTool(client, 'query_sql', { sql: 'SELEC 1' });
@@ -352,7 +352,7 @@ describe('query_sql (free read-only SQL, opt-in per role)', () => {
 
   it('shares the rate limit quota with query_circuit', async () => {
     const limited = await startTestApp([analista], {
-      databaseAdapter: new SpyDatabaseAdapter(),
+      database: new SpyDatabaseAdapter(),
       rateLimit: { maxRequests: 2, windowMs: 60_000 },
     });
     const client = await connectClient(limited.url, analista.token);
